@@ -1073,7 +1073,7 @@ public:
                 case 0:
                     cout << "\n";
                     Utils::separator(C::BGRN, '=');
-                    Utils::printTitle("  Thank you for banking with us. Goodbye!  ",
+                    Utils::printTitle("  Thank you for banking with us!  ",
                                       C::BLD + C::BLU, C::BG_GRN);
                     Utils::separator(C::BGRN, '=');
                     cout << "\n";
