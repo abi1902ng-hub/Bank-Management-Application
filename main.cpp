@@ -1,4 +1,8 @@
-
+/*
+ * ================================================================
+ *         BANK MANAGEMENT SYSTEM  v2.0  — C++ OOP + File I/O
+ * ================================================================
+ */
 
 #include <iostream>
 #include <fstream>
@@ -75,9 +79,20 @@ namespace Utils {
 
     // ── Validators ─────────────────────────────────────────────
 
+    // User PIN: 4-6 numeric digits only
     bool isValidPin(const string& pin) {
         if (pin.size() < 4 || pin.size() > 6) return false;
         return all_of(pin.begin(), pin.end(), ::isdigit);
+    }
+
+    // Admin PIN: 6-12 chars, must have >= 1 letter AND >= 1 digit
+    bool isValidAdminPin(const string& pin) {
+        if (pin.size() < 6 || pin.size() > 12) return false;
+        bool hasLetter = any_of(pin.begin(), pin.end(), ::isalpha);
+        bool hasDigit  = any_of(pin.begin(), pin.end(), ::isdigit);
+        bool allAlnum  = all_of(pin.begin(), pin.end(),
+                                [](char c){ return isalnum(c) || c == '@' || c == '_'; });
+        return hasLetter && hasDigit && allAlnum;
     }
 
     bool isValidName(const string& name) {
@@ -139,6 +154,18 @@ namespace Utils {
             string id; cin >> id; clearInput();
             if (isValidAccountId(id)) return id;
             cout << C::BRED << "  [!] Invalid format. Account IDs look like ACC1001.\n" << C::R;
+        }
+    }
+
+    // Admin PIN reader: letters + digits, 6-12 chars
+    string readValidatedAdminPin(const string& prompt) {
+        while (true) {
+            cout << C::YLW << prompt << C::R;
+            string pin; cin >> pin; clearInput();
+            if (isValidAdminPin(pin)) return pin;
+            cout << C::BRED
+                 << "  [!] Admin PIN must be 6-12 chars with at least one letter and one digit.\n"
+                 << C::R;
         }
     }
 
@@ -489,7 +516,7 @@ class Bank {
     const string DATA_FILE  = "bank_data.dat";
     const string TRASH_FILE = "bank_trash.dat";
     const string LOG_FILE   = "bank_log.txt";
-    const string ADMIN_PIN  = "123456";
+    const string ADMIN_PIN  = "Bank@2025";
 
     vector<Account*>     accounts;
     vector<TrashedEntry> trash;
@@ -830,7 +857,7 @@ class Bank {
     // ================================================================
 
     void adminPanel() {
-        string pin = Utils::readValidatedPin("\n  Admin PIN: ");
+        string pin = Utils::readValidatedAdminPin("\n  Admin PIN: ");
         if (pin != ADMIN_PIN) {
             Utils::printError("Wrong admin PIN. Access denied.");
             Utils::pauseForEnter();
@@ -840,25 +867,27 @@ class Bank {
         while (true) {
             cout << "\n";
             Utils::separator(C::BYLW, '=');
-            Utils::printTitle("  ADMIN PANEL  ", C::BLD + C::BLU, C::BG_YLW);
+            Utils::printTitle("  ADMIN PANEL  ", C::BLD + C::BWHT, C::BG_YLW);
             Utils::separator(C::BYLW, '=');
             cout << "\n";
             menuItem(1, "View All Accounts",              C::BCYN);
             menuItem(2, "Search Account by Name",         C::BCYN);
             menuItem(3, "Delete Account  (moves to Trash)",C::BRED);
             menuItem(4, "View Trash / Recently Deleted",  C::BYLW);
-            menuItem(5, "View System Log",                C::BMAG);
-            menuItem(0, "Back to Main Menu",              C::BRED);
+            menuItem(5, "Restore Account from Trash",      C::BGRN);
+            menuItem(6, "View System Log",                 C::BMAG);
+            menuItem(0, "Back to Main Menu",               C::BRED);
             cout << "\n";
 
-            int choice = Utils::readIntInRange("  Choice [0-5]: ", 0, 5);
+            int choice = Utils::readIntInRange("  Choice [0-6]: ", 0, 6);
             switch (choice) {
                 case 0: return;
-                case 1: adminListAll();   break;
-                case 2: adminSearch();    break;
-                case 3: adminDelete();    break;
-                case 4: adminViewTrash(); break;
-                case 5: adminViewLog();   break;
+                case 1: adminListAll();          break;
+                case 2: adminSearch();           break;
+                case 3: adminDelete();           break;
+                case 4: adminViewTrash();        break;
+                case 5: adminRestoreFromTrash(); break;
+                case 6: adminViewLog();          break;
             }
         }
     }
@@ -1009,6 +1038,113 @@ class Bank {
         Utils::pauseForEnter();
     }
 
+    void adminRestoreFromTrash() {
+        // Purge expired first
+        trash.erase(remove_if(trash.begin(), trash.end(),
+                              [](const TrashedEntry& e){ return e.isExpired(); }),
+                    trash.end());
+        saveTrash();
+
+        cout << "\n";
+        Utils::separator(C::BYLW, '=');
+        Utils::printTitle("  RESTORE FROM TRASH  ", C::BLD + C::BWHT, C::BG_YLW);
+        Utils::separator(C::BYLW, '=');
+
+        if (trash.empty()) {
+            cout << C::DIM << "\n  Trash is empty. Nothing to restore.\n" << C::R;
+            Utils::pauseForEnter();
+            return;
+        }
+
+        // List trash entries with index
+        cout << "\n  " << C::BCYN << C::BLD
+             << left  << setw(5)  << "#"
+             << setw(10) << "ID"
+             << setw(22) << "Name"
+             << setw(14) << "Type"
+             << right << setw(10) << "Days Left"
+             << C::R << "\n";
+        Utils::separator(C::DIM, '.');
+        for (int i = 0; i < (int)trash.size(); ++i) {
+            const auto& e = trash[i];
+            int dl = e.daysLeft();
+            string dlCol = (dl <= 7) ? C::BRED : C::BYLW;
+            cout << "  " << C::BCYN << C::BLD << left << setw(5) << (i + 1) << C::R
+                 << C::BWHT << setw(10) << e.accountId
+                 << setw(22) << e.holderName
+                 << C::DIM  << setw(14) << e.accType
+                 << dlCol << right << setw(7) << to_string(dl) + "d"
+                 << C::R << "\n";
+        }
+        Utils::separator(C::BYLW, '.');
+
+        int sel = Utils::readIntInRange(
+            "  Enter 1 to restore (0 to cancel): ", 0, (int)trash.size());
+        if (sel == 0) {
+            cout << C::DIM << "  Cancelled.\n" << C::R;
+            Utils::pauseForEnter();
+            return;
+        }
+
+        TrashedEntry& entry = trash[sel - 1];
+
+        // Check no ID clash with existing active accounts
+        if (findAccount(entry.accountId) != nullptr) {
+            Utils::printError("An active account with ID " + entry.accountId +
+                              " already exists. Cannot restore.");
+            Utils::pauseForEnter();
+            return;
+        }
+
+        // Rebuild Account object from TrashedEntry
+        Account* acc = nullptr;
+        if      (entry.accType == "Savings")      acc = new SavingsAccount();
+        else if (entry.accType == "Current")      acc = new CurrentAccount();
+        else if (entry.accType == "FixedDeposit") acc = new FixedDepositAccount();
+        else                                      acc = new SavingsAccount();
+
+        acc->restoreFields(entry.accountId, entry.holderName,
+                           entry.pin, entry.balance, entry.createdAt);
+
+        // Replay history via temp file
+        {
+            ofstream tmp("__restore_tmp__.dat", ios::trunc);
+            tmp << "ACCOUNT|" << entry.accType << "|" << entry.accountId << "|"
+                << entry.holderName << "|" << entry.pin << "|"
+                << fixed << setprecision(6) << entry.balance << "|"
+                << entry.createdAt << "\n";
+            tmp << "TXCOUNT|" << entry.history.size() << "\n";
+            for (const auto& tx : entry.history)
+                tmp << "TX|" << tx.serialise() << "\n";
+            tmp << "END\n";
+            tmp.close();
+
+            ifstream rin("__restore_tmp__.dat");
+            string line;
+            getline(rin, line); // ACCOUNT header
+            size_t cnt = 0;
+            if (getline(rin, line) && line.rfind("TXCOUNT|", 0) == 0)
+                cnt = stoul(line.substr(8));
+            acc->loadHistory(rin, cnt);
+            rin.close();
+            remove("__restore_tmp__.dat");
+        }
+
+        accounts.push_back(acc);
+        saveData();
+
+        string restoredId   = entry.accountId;
+        string restoredName = entry.holderName;
+        trash.erase(trash.begin() + (sel - 1));
+        saveTrash();
+        log("Account restored from trash: " + restoredId + " (" + restoredName + ")");
+
+        cout << "\n";
+        Utils::printSuccess("Account " + restoredId + " (" + restoredName +
+                            ") has been restored successfully!");
+        Utils::pauseForEnter();
+    }
+
     void adminViewLog() {
         ifstream lf(LOG_FILE);
         if (!lf.is_open()) {
@@ -1074,7 +1210,7 @@ public:
                     cout << "\n";
                     Utils::separator(C::BGRN, '=');
                     Utils::printTitle("  Thank you for banking with us!  ",
-                                      C::BLD + C::BLU, C::BG_GRN);
+                                      C::BLD + C::BWHT, C::BG_GRN);
                     Utils::separator(C::BGRN, '=');
                     cout << "\n";
                     return;
